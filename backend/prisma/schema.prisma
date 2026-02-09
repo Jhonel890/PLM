@@ -1,0 +1,72 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql" // O tu proveedor (postgresql, mysql)
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  players   Player[]
+  createdAt DateTime @default(now())
+}
+
+model GameRoom {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique
+  status      String    // 'WAITING', 'PLAYING', 'FINISHED'
+  maxRounds   Int       @default(5)
+  
+  // --- NUEVOS CAMPOS ---
+  categories  String    @default("NOMBRE,APELLIDO,CIUDAD,ANIMAL,FRUTA,COSA") // CSV
+  usedLetters String    @default("") // CSV de letras usadas: "A,J,X"
+  // ---------------------
+
+  players     Player[]
+  rounds      Round[]
+  createdAt   DateTime  @default(now())
+}
+
+model Player {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  roomId    Int
+  socketId  String?
+  isHost    Boolean   @default(false)
+  score     Int       @default(0)
+  
+  user      User      @relation(fields: [userId], references: [id])
+  room      GameRoom  @relation(fields: [roomId], references: [id])
+  answers   Answer[]
+}
+
+model Round {
+  id          Int      @id @default(autoincrement())
+  roomId      Int
+  roundNumber Int
+  letter      String
+  status      String   // 'ACTIVE', 'VOTING', 'FINISHED'
+  stopperId   Int?     // ID del usuario que paró la ronda
+
+  room        GameRoom @relation(fields: [roomId], references: [id])
+  answers     Answer[]
+}
+
+model Answer {
+  id        Int      @id @default(autoincrement())
+  roundId   Int
+  playerId  Int
+  category  String
+  content   String
+  isValid   Boolean  @default(true)
+  score     Int      @default(0)
+
+  round     Round    @relation(fields: [roundId], references: [id])
+  player    Player   @relation(fields: [playerId], references: [id])
+}

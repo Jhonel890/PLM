@@ -1,0 +1,22 @@
+/* Importamos fuentes de Google Fonts: Patrick Hand (Manuscrita) y Rubik (Geométrica) */
+@import url('https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Rubik:wght@500;700;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Estilos Base "Paper Pop" */
+body {
+  background-color: #fdf6e3; /* Color papel de fondo */
+  background-image: radial-gradient(#d1d5db 1px, transparent 1px); /* Puntos sutiles tipo libreta */
+  background-size: 20px 20px;
+  color: #2d2d2d;
+  font-family: 'Patrick Hand', cursive; /* Fuente por defecto */
+}
+
+/* Clase utilitaria para títulos impactantes */
+.font-heading {
+  font-family: 'Rubik', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: -0.05em;
+}
