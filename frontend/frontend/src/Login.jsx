@@ -1,11 +1,8 @@
 import { useState } from 'react';
-import Logo from './Logo'; // Asegúrate de tener el logo importado
+import Logo from './Logo';
 
-// -------------------------------------------------------------------------
-// URL DE PRODUCCIÓN (La nube de Render)
-// Debe ser IGUAL que en socket.js
-// -------------------------------------------------------------------------
-const API_URL = 'https://mind-rush-backend.onrender.com'; 
+// URL DE TU BACKEND EN RENDER
+const API_URL = 'https://mind-rush-backend.onrender.com';
 
 const Login = ({ onJoin }) => {
   const [username, setUsername] = useState('');
@@ -28,6 +25,7 @@ const Login = ({ onJoin }) => {
     setIsLoading(true);
 
     try {
+      // Petición a la nube
       const response = await fetch(`${API_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -39,7 +37,7 @@ const Login = ({ onJoin }) => {
       if (response.ok) {
         onJoin(data.user); 
       } else if (response.status === 404) {
-        setShowRegisterConfirm(true); // Usuario no existe -> Preguntar registro
+        setShowRegisterConfirm(true);
       } else {
         setError(data.message || 'Error al conectar');
       }
@@ -80,10 +78,8 @@ const Login = ({ onJoin }) => {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-paper p-4">
-        
         <div className="bg-white border-2 border-ink p-8 w-full max-w-md shadow-pop transform rotate-1 transition-transform hover:rotate-0 relative">
           
-          {/* LOGO */}
           <div className="flex justify-center mb-6 -mt-12">
              <div className="bg-white p-2 rounded-full border-4 border-ink shadow-sm rotate-[-3deg] hover:rotate-3 transition-transform duration-500">
                 <Logo size="h-24" />
@@ -94,7 +90,6 @@ const Login = ({ onJoin }) => {
             Velocidad • Ingenio • Adrenalina
           </p>
 
-          {/* FORMULARIO */}
           <form onSubmit={handleLoginAttempt} className="flex flex-col gap-4">
             <div>
               <label className="block font-bold text-lg mb-1">Usuario</label>
@@ -137,7 +132,6 @@ const Login = ({ onJoin }) => {
             )}
           </form>
 
-          {/* MODAL DE ADVERTENCIA / REGISTRO */}
           {showRegisterConfirm && (
             <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center animate-fade-in z-50 rounded-sm">
                 <div className="bg-white border-4 border-ink p-4 shadow-pop mb-4 rotate-2">
@@ -148,27 +142,14 @@ const Login = ({ onJoin }) => {
                     El usuario <strong>"{username}"</strong> no existe. <br/>
                     ¿Quieres crear una cuenta nueva?
                 </p>
-                
                 <div className="flex flex-col gap-3 w-full">
-                    <button 
-                        onClick={handleRegisterConfirm}
-                        className="w-full py-3 font-heading text-xl text-white bg-neon-green border-2 border-ink shadow-[4px_4px_0px_0px_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#000] transition-all"
-                    >
-                        SÍ, REGISTRARME
-                    </button>
-                    <button 
-                        onClick={() => setShowRegisterConfirm(false)}
-                        className="w-full py-3 font-bold border-2 border-transparent text-gray-400 hover:text-ink hover:border-gray-200 transition-colors"
-                    >
-                        CANCELAR
-                    </button>
+                    <button onClick={handleRegisterConfirm} className="w-full py-3 font-heading text-xl text-white bg-neon-green border-2 border-ink shadow-[4px_4px_0px_0px_#000]">SÍ, REGISTRARME</button>
+                    <button onClick={() => setShowRegisterConfirm(false)} className="w-full py-3 font-bold border-2 border-transparent text-gray-400 hover:text-ink">CANCELAR</button>
                 </div>
             </div>
           )}
-
         </div>
     </div>
   );
 };
-
 export default Login;
