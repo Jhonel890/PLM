@@ -1,11 +1,11 @@
-// frontend/src/socket.js
-import io from 'socket.io-client';
+import { io } from 'socket.io-client';
 
-// Definimos la URL del backend
-const URL = 'http://localhost:3000';
+// -------------------------------------------------------------------------
+// URL DE PRODUCCIÓN (La nube de Render)
+// Esta dirección funciona desde cualquier lugar del mundo 🌍
+// -------------------------------------------------------------------------
+const URL = 'https://mind-rush-backend.onrender.com'; 
 
-// Creamos la instancia pero NO conectamos automáticamente (autoConnect: false)
-// Conectaremos manualmente solo cuando el usuario haga Login.
 export const socket = io(URL, {
-  autoConnect: false
+  autoConnect: false, // Esperamos a que el usuario se loguee
 });
