@@ -21,9 +21,10 @@ const getCategoryIcon = (cat) => {
   return "✏️";
 };
 
-const GameBoard = ({ letter, roundNumber, onTriggerStop, onSubmitAnswers, categories = [] }) => {
-  const [countdown, setCountdown] = useState(3);
-  const [showGame, setShowGame] = useState(false);
+const GameBoard = ({ letter, roundNumber, onTriggerStop, onSubmitAnswers, categories = [], skipCountdown = false }) => {
+  // Inicializamos el contador dependiendo de si es una reconexión
+  const [countdown, setCountdown] = useState(skipCountdown ? 0 : 3);
+  const [showGame, setShowGame] = useState(skipCountdown);
   
   const [stopCountdown, setStopCountdown] = useState(null); 
   const [stopperName, setStopperName] = useState(null);
@@ -51,12 +52,26 @@ const GameBoard = ({ letter, roundNumber, onTriggerStop, onSubmitAnswers, catego
     } else { setShowGame(true); }
   }, [countdown]);
 
+  // --- EFECTO DE ALARMA Y VIBRACIÓN ---
   useEffect(() => {
     const handleWarning = (data) => {
       setStopCountdown(data.seconds);
       setStopperName(data.stopperName);
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      
+      // 1. Vibración intensa (Patrón: corto, corto, largo, corto, extralargo)
+      if (navigator.vibrate) {
+         navigator.vibrate([100, 50, 100, 50, 300, 100, 500]);
+      }
+
+      // 2. Sonido divertido (Bocina de payaso de la galería de Google)
+      try {
+        const audio = new Audio('https://actions.google.com/sounds/v1/cartoon/clown_horn.ogg');
+        audio.play().catch(err => console.log("El navegador bloqueó el auto-play del sonido", err));
+      } catch (error) {
+        console.error("Error reproduciendo el sonido:", error);
+      }
     };
+    
     socket.on('stop_warning', handleWarning);
     return () => socket.off('stop_warning', handleWarning);
   }, []);

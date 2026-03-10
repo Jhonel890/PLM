@@ -34,10 +34,14 @@ function App() {
   const [isCreating, setIsCreating] = useState(false); 
   const [isStarting, setIsStarting] = useState(false); 
 
-  // --- 1. PERSISTENCIA DE SESIÓN ---
+  // --- 1. PERSISTENCIA DE SESIÓN Y RECONEXIÓN AUTOMÁTICA ---
   useEffect(() => {
     const savedUser = localStorage.getItem('plm_user');
-    if (savedUser) setUser(JSON.parse(savedUser));
+    const savedRoom = localStorage.getItem('plm_room');
+    
+    if (savedUser) {
+        setUser(JSON.parse(savedUser));
+    }
   }, []);
 
   // --- 2. GESTIÓN DE SOCKETS ---
@@ -46,6 +50,29 @@ function App() {
       // Conectar al socket con el usuario actual
       socket.auth = { username: user.username };
       socket.connect();
+
+      // INTENTAR RECONEXIÓN AUTOMÁTICA
+      const savedRoom = localStorage.getItem('plm_room');
+      if (savedRoom) {
+        socket.emit('rejoin_game', { roomCode: savedRoom, userId: user.id }, (res) => {
+          if (res.status === 'OK') {
+            setRoom(res.room);
+            setIsHost(res.player.isHost);
+            if(res.room.categories) setActiveCategories(res.room.categories.split(','));
+            
+            if (res.currentRound) {
+              setRoundData({ letter: res.currentRound.letter, roundNumber: res.currentRound.roundNumber, roundId: res.currentRound.id });
+              setView('GAME');
+            } else if (res.room.status === 'WAITING') {
+              setView('WAITING_ROOM');
+            } else {
+              setView('WAITING_RESULTS');
+            }
+          } else {
+            localStorage.removeItem('plm_room');
+          }
+        });
+      }
 
       // Escuchar eventos
       socket.on('update_players', (list) => setPlayers(list));
@@ -106,10 +133,20 @@ function App() {
   
   const handleLogout = () => {
     localStorage.removeItem('plm_user');
+    localStorage.removeItem('plm_room'); // También borramos la sala
     socket.disconnect();
     setUser(null);
     setRoom(null);
     setView('LOBBY');
+  };
+
+  // Función para Volver al Inicio sin cerrar sesión
+  const handleLeaveRoom = () => {
+    setRoom(null);
+    setIsHost(false);
+    setPlayers([]);
+    setView('LOBBY');
+    localStorage.removeItem('plm_room');
   };
 
   const handleCreateRoomFinal = (config) => {
@@ -126,6 +163,8 @@ function App() {
           setIsHost(true);
           setPlayers([{ ...res.player, user: user }]);
           if(res.room.categories) setActiveCategories(res.room.categories.split(','));
+          
+          localStorage.setItem('plm_room', res.room.code); // GUARDA LA SALA
           setView('WAITING_ROOM'); 
         } else {
           alert("Error: " + res.message);
@@ -140,6 +179,8 @@ function App() {
         setIsHost(res.player.isHost); 
         setIsJoinModalOpen(false);
         if(res.room.categories) setActiveCategories(res.room.categories.split(','));
+        
+        localStorage.setItem('plm_room', res.room.code); // GUARDA LA SALA
         setView('WAITING_ROOM');
       } else {
         alert("Error: " + res.message);
@@ -152,7 +193,6 @@ function App() {
     socket.emit('start_game', { roomCode: room.code }, (res) => {
       if (res.status !== 'OK') {
          setIsStarting(false);
-         // Si es un error de validación (ej: pocos jugadores), mostramos alerta
          if (res.message !== 'Game Over') alert("⚠️ " + res.message);
       }
     });
@@ -173,7 +213,6 @@ function App() {
       if (response.status === 'OK') {
         setView('WAITING_RESULTS');
         if (isHost) {
-          // El host pide los resultados después de un breve delay
           setTimeout(() => {
             socket.emit('get_round_results', { roomCode: room.code, roundId: roundData.roundId }, () => {});
           }, 2000);
@@ -190,19 +229,69 @@ function App() {
 
   // --- RENDERIZADO ---
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-paper p-4 font-sans text-ink">
+    // pt-16 para que la nueva barra superior no tape el juego
+    <div className={`min-h-screen flex flex-col items-center justify-center bg-paper font-sans text-ink ${user ? 'pt-16 pb-4 px-4' : 'p-4'}`}>
       
-      {/* HEADER GLOBAL (Cerrar sesión + Logo) */}
+      {/* ============================================== */}
+      {/* 🌟 HEADER GLOBAL (Control de Sala y Sesión) 🌟 */}
+      {/* ============================================== */}
       {user && (
-        <>
-            <button onClick={handleLogout} className="fixed top-4 right-4 text-xs font-bold text-gray-400 hover:text-neon-pink underline z-[60]">
-                CERRAR SESIÓN
-            </button>
-            <div className="fixed top-2 left-2 z-[60] pointer-events-none">
-                {/* Logo Responsive: Pequeño en móvil (h-10), grande en PC (md:h-20) */}
-                <Logo size="h-10 md:h-20" className="hover:scale-110 transition-transform duration-300 drop-shadow-md" />
-            </div>
-        </>
+        <div className={`fixed top-0 left-0 right-0 z-[100] flex items-center justify-between px-3 md:px-6 transition-all ${room ? 'h-16 bg-ink border-b-4 border-neon-pink shadow-md animate-fade-in-up' : 'h-20 pointer-events-none'}`}>
+           
+           <div className="flex items-center gap-2 md:gap-4 pointer-events-auto">
+              {/* Logo (Clickable para ir al inicio si estás en una sala) */}
+              <div 
+                onClick={() => {
+                  if (room && window.confirm('¿Volver a la pantalla principal? Abandonarás la sala actual.')) {
+                    handleLeaveRoom();
+                  }
+                }}
+                className={`transition-transform ${room ? 'cursor-pointer hover:scale-105' : ''}`}
+                title={room ? "Volver al inicio" : ""}
+              >
+                <Logo size="h-10 md:h-12" className={`drop-shadow-md ${room ? 'hidden sm:block' : ''}`} />
+              </div>
+              
+              {/* Código de Sala EN EL HEADER (Solo si estás dentro de una) */}
+              {room && (
+                <div 
+                  onClick={() => {
+                    navigator.clipboard.writeText(room.code);
+                    alert(`¡Código ${room.code} copiado al portapapeles!`);
+                  }}
+                  className="flex items-center gap-2 bg-white/10 px-3 py-1 md:py-2 rounded border border-white/20 cursor-pointer hover:bg-white/20 transition-colors group"
+                  title="Copiar Código"
+                >
+                   <span className="font-heading text-xs md:text-sm text-gray-300 hidden md:inline">SALA:</span>
+                   <span className="font-heading text-xl md:text-2xl text-neon-yellow tracking-widest">{room.code}</span>
+                   <span className="text-xs md:text-sm group-hover:scale-125 transition-transform">📋</span>
+                </div>
+              )}
+           </div>
+
+           {/* BOTONES DERECHA */}
+           <div className="flex items-center pointer-events-auto">
+             {room ? (
+               // Botón: Volver al menú principal (Lobby)
+               <button 
+                 onClick={() => {
+                   if(window.confirm('¿Seguro que quieres volver al inicio? Abandonarás la partida.')) handleLeaveRoom();
+                 }} 
+                 className="text-[10px] md:text-xs font-bold bg-white text-ink hover:bg-red-500 hover:text-white px-3 py-2 border-2 border-ink shadow-[2px_2px_0px_0px_#000] active:translate-y-1 active:shadow-none transition-all flex items-center gap-1"
+               >
+                 <span className="text-sm">🏠</span> <span className="hidden md:inline">VOLVER AL</span> INICIO
+               </button>
+             ) : (
+               // Botón: Cerrar Sesión (Solo visible en el Lobby)
+               <button 
+                 onClick={handleLogout} 
+                 className="text-xs font-bold text-gray-400 hover:text-neon-pink underline"
+               >
+                 CERRAR SESIÓN
+               </button>
+             )}
+           </div>
+        </div>
       )}
 
       {/* MODALES */}
@@ -211,12 +300,11 @@ function App() {
 
       {/* --- GESTIÓN DE VISTAS --- */}
       {!user ? (
-        // 1. LOGIN
         <Login onJoin={handleLogin} />
       ) : view === 'GAME' ? (
-        // 2. TABLERO DE JUEGO
         <GameBoard 
             user={user} 
+            roomCode={room.code}
             letter={roundData.letter} 
             roundNumber={roundData.roundNumber} 
             onTriggerStop={handleTriggerStop} 
@@ -224,7 +312,6 @@ function App() {
             categories={activeCategories} 
         />
       ) : view === 'WAITING_RESULTS' ? (
-        // 3. PANTALLA DE CARGA (ESPERANDO JUEZ)
         <div className="flex flex-col items-center justify-center animate-pulse text-center max-w-md">
           <div className="text-8xl mb-6 animate-bounce">⚖️</div>
           <h2 className="font-heading text-4xl text-ink mb-2">JUEZ DELIBERANDO</h2>
@@ -232,21 +319,18 @@ function App() {
           {stopperName && <div className="mt-8 bg-neon-yellow border-2 border-ink px-6 py-2 rotate-2 font-bold shadow-sm">STOP PRESIONADO POR: <span className="text-neon-pink">{stopperName}</span></div>}
         </div>
       ) : view === 'RESULTS' ? (
-        // 4. TABLA DE RESULTADOS
         <ResultsBoard 
           results={results} isHost={isHost} onNextRound={handleStartGame} 
           onVoteInvalid={handleVoteInvalid} currentVotes={currentVotes} userId={user.id} 
           isStarting={isStarting} categories={activeCategories}
         />
       ) : view === 'GAME_OVER' ? ( 
-        // 5. FIN DEL JUEGO (PREMIOS)
         <GameOverBoard 
            finalStats={finalStats} 
            isHost={isHost} 
            onResetGame={handleResetGame} 
         />
       ) : !room ? (
-        // 6. LOBBY PRINCIPAL (MENÚ)
         <Lobby 
             user={user} 
             onCreateRoom={() => setIsCreateModalOpen(true)} 
@@ -254,21 +338,31 @@ function App() {
             isCreating={isCreating} 
         />
       ) : (
-        // 7. SALA DE ESPERA (WAITING ROOM)
-        <div className="bg-white border-2 border-ink p-8 shadow-pop text-center max-w-md w-full animate-fade-in-up relative">
+        // ==============================================
+        // 🏠 SALA DE ESPERA (PREPARANDO PARTIDA)
+        // ==============================================
+        <div className="bg-white border-2 border-ink p-8 shadow-pop text-center max-w-md w-full animate-fade-in-up relative mt-8">
            <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-neon-yellow border-2 border-ink px-4 py-1 font-bold shadow-sm rotate-[-2deg]">
-             ESPERANDO JUGADORES
+             PREPARANDO PARTIDA
            </div>
            
-           <p className="font-hand text-xl text-gray-500 mt-4">CÓDIGO DE SALA</p>
-           <h1 className="text-6xl font-heading text-neon-blue tracking-widest my-2 cursor-pointer hover:scale-105 transition-transform" onClick={() => navigator.clipboard.writeText(room.code)}>
+           {/* --- CÓDIGO DE SALA EN GRANDE --- */}
+           <p className="font-hand text-xl text-gray-500 mt-6">CÓDIGO DE SALA</p>
+           <h1 
+             className="text-6xl font-heading text-neon-blue tracking-widest my-2 cursor-pointer hover:scale-105 transition-transform" 
+             onClick={() => {
+               navigator.clipboard.writeText(room.code);
+               alert(`¡Código ${room.code} copiado al portapapeles!`);
+             }}
+             title="Toca para copiar"
+           >
              {room.code}
            </h1>
            
            <div className="mt-8 text-left">
               <h3 className="font-heading text-lg border-b-2 border-ink mb-2 flex justify-between">
-                <span>JUGADORES</span>
-                <span className="bg-gray-200 px-2 rounded-full text-sm">{players.length}</span>
+                <span>JUGADORES EN SALA</span>
+                <span className="bg-gray-200 px-2 rounded-full text-sm">{players.length}/8</span>
               </h3>
               <ul className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
                 {players.map(p => (
@@ -282,18 +376,8 @@ function App() {
               </ul>
            </div>
            
-           {/* Botón Salir */}
-           <button 
-             onClick={() => { setRoom(null); setIsHost(false); setPlayers([]); setView('LOBBY'); }} 
-             className="mt-8 text-gray-400 hover:text-ink text-sm underline block w-full text-center mb-4 transition-colors"
-           >
-             Salir de la sala
-           </button>
-           
-           {/* Panel de Control del Host */}
            {isHost ? (
-             <div className="flex flex-col gap-2">
-               {/* ADVERTENCIA: MÍNIMO 2 JUGADORES */}
+             <div className="flex flex-col gap-2 mt-8">
                {players.length < 2 && (
                  <p className="text-xs text-neon-pink font-bold animate-pulse">
                    ⚠️ Se necesitan al menos 2 jugadores
@@ -324,8 +408,8 @@ function App() {
                </button>
              </div>
            ) : (
-             <div className="p-4 bg-paper border border-ink border-dashed text-sm text-gray-500 animate-pulse text-center">
-               ⏳ Esperando al anfitrión...
+             <div className="mt-8 p-4 bg-paper border border-ink border-dashed text-sm text-gray-500 animate-pulse text-center">
+               ⏳ Esperando a que el Host inicie...
              </div>
            )}
         </div>

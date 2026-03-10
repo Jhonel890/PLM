@@ -1,3 +1,4 @@
+// backend/src/handlers/socketHandler.js
 const prisma = require('../database/db');
 const { generateRoomCode } = require('../utils/codeGenerator');
 
@@ -8,7 +9,7 @@ module.exports = (io) => {
   io.on('connection', (socket) => {
     console.log(`🔌 Conectado: ${socket.id}`);
 
-    // CREAR SALA
+    // 1. CREAR SALA
     socket.on('create_room', async ({ userId, username, config }, callback) => {
       try {
         const userExists = await prisma.user.findUnique({ where: { id: userId } });
@@ -36,13 +37,19 @@ module.exports = (io) => {
       } catch (e) { callback({ status: 'ERROR', message: 'Error al crear sala' }); }
     });
 
-    // UNIRSE
+    // 2. UNIRSE A SALA
     socket.on('join_room', async ({ roomCode, userId }, callback) => {
       try {
         const room = await prisma.gameRoom.findUnique({ where: { code: roomCode }, include: { players: true } });
         if (!room) return callback({ status: 'ERROR', message: 'Sala no encontrada' });
         
         const isAlreadyIn = room.players.find(p => p.userId === userId);
+        
+        // Límite de 8 jugadores
+        if (!isAlreadyIn && room.players.length >= 8) {
+            return callback({ status: 'ERROR', message: 'La sala está llena (Máximo 8 personas)' });
+        }
+        
         if (!isAlreadyIn && room.status !== 'WAITING') return callback({ status: 'ERROR', message: 'Partida ya iniciada' });
 
         let player;
@@ -52,6 +59,7 @@ module.exports = (io) => {
         } else {
           player = await prisma.player.create({ data: { userId, roomId: room.id, isHost: false, socketId: socket.id } });
         }
+        
         socket.join(roomCode);
         const allPlayers = await prisma.player.findMany({ where: { roomId: room.id }, include: { user: true } });
         io.to(roomCode).emit('update_players', allPlayers);
@@ -59,18 +67,59 @@ module.exports = (io) => {
       } catch (e) { callback({ status: 'ERROR' }); }
     });
 
-    // INICIAR JUEGO (Con validación de jugadores)
+    // 3. RECONEXIÓN AUTOMÁTICA MEJORADA
+    socket.on('rejoin_game', async ({ roomCode, userId }, callback) => {
+      try {
+        const room = await prisma.gameRoom.findUnique({ where: { code: roomCode }, include: { players: true } });
+        if (!room) return callback({ status: 'ERROR' });
+
+        const player = room.players.find(p => p.userId === userId);
+        if (!player) return callback({ status: 'ERROR' });
+
+        // Actualizamos su nuevo socket (la pestaña que acaba de recargar)
+        await prisma.player.update({ where: { id: player.id }, data: { socketId: socket.id } });
+        socket.join(roomCode);
+
+        // Buscar el estado EXACTO de la partida
+        let currentRound = null;
+        let roundState = 'WAITING';
+
+        if (room.status === 'PLAYING') {
+           // Buscamos la última ronda sin importar si está activa o en votación
+           currentRound = await prisma.round.findFirst({
+               where: { roomId: room.id },
+               orderBy: { roundNumber: 'desc' }
+           });
+           if (currentRound) {
+               roundState = currentRound.status; // Puede ser 'ACTIVE' o 'VOTING'
+           }
+        }
+
+        const allPlayers = await prisma.player.findMany({ where: { roomId: room.id }, include: { user: true } });
+        io.to(roomCode).emit('update_players', allPlayers);
+
+        callback({ 
+            status: 'OK', 
+            room, 
+            player, 
+            currentRound, 
+            roundState 
+        });
+      } catch (e) {
+        callback({ status: 'ERROR' });
+      }
+    });
+
+    // 4. INICIAR JUEGO
     socket.on('start_game', async ({ roomCode }, callback) => {
       try {
         for (const id in answerVotes) delete answerVotes[id];
         const room = await prisma.gameRoom.findUnique({ where: { code: roomCode }, include: { players: true } });
         
-        // --- VALIDACIÓN: Mínimo 2 jugadores ---
         if (room.players.length < 2) {
             return callback({ status: 'ERROR', message: 'Se necesitan mínimo 2 jugadores.' });
         }
 
-        // Fin de juego?
         const roundsCount = await prisma.round.count({ where: { roomId: room.id } });
         if (roundsCount >= room.maxRounds) {
             const stats = await calculateGameStats(room.id);
@@ -79,7 +128,6 @@ module.exports = (io) => {
             return callback({ status: 'OK', message: 'Game Over' });
         }
 
-        // Elegir Letra
         const alphabet = "ABCDEFGHIJLMNOPQRSTUVWXYZ".split('');
         const used = room.usedLetters ? room.usedLetters.split(',') : [];
         const available = alphabet.filter(l => !used.includes(l));
@@ -106,7 +154,7 @@ module.exports = (io) => {
       } catch (e) { console.error(e); callback({ status: 'ERROR' }); }
     });
 
-    // STOP
+    // 5. STOP
     socket.on('trigger_stop', async ({ roomCode, userId, username, roundId }, callback) => {
       if (stopTimers[roomCode]) return callback({ status: 'OK' });
       io.to(roomCode).emit('stop_warning', { stopperName: username, seconds: 5 });
@@ -120,7 +168,7 @@ module.exports = (io) => {
       callback({ status: 'OK' });
     });
 
-    // ENVIAR RESPUESTAS
+    // 6. ENVIAR RESPUESTAS
     socket.on('submit_answers', async ({ roomCode, userId, answers, roundId }, callback) => {
       const room = await prisma.gameRoom.findUnique({ where: { code: roomCode } });
       const player = await prisma.player.findFirst({ where: { userId, roomId: room.id } });
@@ -133,7 +181,7 @@ module.exports = (io) => {
       callback({ status: 'OK' });
     });
 
-    // VOTACIÓN
+    // 7. VOTACIÓN
     socket.on('vote_answer_invalid', async ({ roomCode, answerId, userId, roundId }, callback) => {
       const targetAnswer = await prisma.answer.findUnique({ where: { id: answerId }, include: { player: true } });
       if (!targetAnswer || targetAnswer.player.userId === userId) return callback({ status: 'ERROR' });
@@ -158,6 +206,7 @@ module.exports = (io) => {
       await calculateAndBroadcastResults(io, roomCode, roundId); callback({ status: 'OK' });
     });
 
+    // 8. RESET ROOM
     socket.on('reset_room', async ({ roomCode }, callback) => {
         const room = await prisma.gameRoom.findUnique({ where: { code: roomCode } });
         await prisma.gameRoom.update({ where: { id: room.id }, data: { status: 'WAITING', usedLetters: "" } });
@@ -168,13 +217,21 @@ module.exports = (io) => {
         callback({ status: 'OK' });
     });
 
-    // HELPERS
+    // --- HELPERS ---
     async function calculateAndBroadcastResults(io, roomCode, roundId) {
         const allAnswers = await prisma.answer.findMany({ where: { roundId }, include: { player: { include: { user: true } } } });
         const validAnalysis = {}; 
+        
         allAnswers.forEach(ans => {
-          if (!ans.isValid) return;
-          const cat = ans.category; const word = ans.content.trim().toUpperCase();
+          // INVALIDAR AUTOMÁTICAMENTE 1 LETRA O MENOS
+          if (ans.content.trim().length <= 1) {
+              ans.isValid = false;
+          }
+
+          if (!ans.isValid) return; 
+          
+          const cat = ans.category; 
+          const word = ans.content.trim().toUpperCase();
           if (!validAnalysis[cat]) validAnalysis[cat] = {};
           if (!validAnalysis[cat][word]) validAnalysis[cat][word] = [];
           if (word.length > 0) validAnalysis[cat][word].push(ans.id);
@@ -187,8 +244,8 @@ module.exports = (io) => {
              const count = validAnalysis[ans.category]?.[ans.content.trim().toUpperCase()]?.length || 0;
              newScore = (count > 1) ? 50 : 100;
           }
-          if (ans.score !== newScore) {
-             updates.push(prisma.answer.update({ where: { id: ans.id }, data: { score: newScore } }));
+          if (ans.score !== newScore || ans.isValid === false) {
+             updates.push(prisma.answer.update({ where: { id: ans.id }, data: { score: newScore, isValid: ans.isValid } }));
              ans.score = newScore;
           }
           const u = ans.player.userId;

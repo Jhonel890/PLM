@@ -2,7 +2,8 @@ import { useState } from 'react';
 import Logo from './Logo';
 
 // URL DE TU BACKEND EN RENDER
-const API_URL = 'https://mind-rush-backend.onrender.com';
+//const API_URL = 'https://mind-rush-backend.onrender.com';
+const API_URL = 'http://localhost:3000';
 
 const Login = ({ onJoin }) => {
   const [username, setUsername] = useState('');
